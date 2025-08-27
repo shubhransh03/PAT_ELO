@@ -1,43 +1,82 @@
 import React, { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { apiPost } from '../api';
+import { API_BASE } from '../api';
+
+// NOTE: Import/export here uses direct fetch because endpoints return/accept whole JSON snapshot
 
 const Settings = () => {
   const [importFile, setImportFile] = useState(null);
-  const [exportFormat, setExportFormat] = useState('csv');
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importWipe, setImportWipe] = useState(false);
+  const [message, setMessage] = useState('');
+  // Force CSV format only
+  const entityFormat = 'csv';
+  const [entity, setEntity] = useState('patients');
 
-  // Import data mutation
-  const importMutation = useMutation({
-    mutationFn: (formData) => apiPost('/api/integrations/import', formData),
-    onSuccess: () => {
-      alert('Data imported successfully!');
+  const resetMessageLater = () => setTimeout(() => setMessage(''), 5000);
+
+  const handleImport = async (e) => {
+    e.preventDefault();
+    if (!importFile) return setMessage('Select a JSON export file first');
+    setImporting(true);
+    setMessage('Importing...');
+    try {
+      const text = await importFile.text();
+      const json = JSON.parse(text);
+      if (importWipe) json.wipe = true;
+      const res = await fetch('/api/data/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(json)
+      });
+      if (!res.ok) throw new Error(`Import failed (${res.status})`);
+      const result = await res.json();
+      setMessage(`Import complete. Inserted: users ${result.results?.users?.inserted || 0}, patients ${result.results?.patients?.inserted || 0}`);
       setImportFile(null);
-    },
-    onError: (error) => {
-      alert(`Import failed: ${error.message}`);
-    },
-  });
-
-  const handleImport = (event) => {
-    event.preventDefault();
-    if (!importFile) {
-      alert('Please select a file to import');
-      return;
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setImporting(false);
+      resetMessageLater();
     }
-
-    const formData = new FormData();
-    formData.append('file', importFile);
-    importMutation.mutate(formData);
   };
 
-  const handleExport = () => {
-    // In a real app, this would trigger a download
-    alert(`Exporting all data as ${exportFormat.toUpperCase()}...`);
+  const handleEntityCSVDownload = async (ent) => {
+    const url = `${API_BASE}/api/data/export/${ent}?format=csv`;
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) throw new Error(`Export ${ent} failed (${res.status})`);
+    const ctype = res.headers.get('content-type') || '';
+    if (ctype.includes('text/html')) throw new Error('Received HTML (likely wrong API base URL)');
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = `${ent}.csv`;
+    a.click();
+    URL.revokeObjectURL(objUrl);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setMessage('Exporting all entities (CSV)...');
+    try {
+      const entities = ['patients', 'users', 'therapyPlans', 'sessions', 'progressReports'];
+      for (const ent of entities) {
+        // eslint-disable-next-line no-await-in-loop
+        await handleEntityCSVDownload(ent);
+      }
+      setMessage('All CSV files downloaded');
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setExporting(false);
+      resetMessageLater();
+    }
   };
 
   const handleBackup = () => {
-    // In a real app, this would trigger a backup
-    alert('Creating backup of all collections...');
+    setMessage('Backup endpoint not implemented yet');
+    resetMessageLater();
   };
 
   return (
@@ -47,7 +86,7 @@ const Settings = () => {
       </div>
 
       <div className="grid grid-2" style={{ marginBottom: '2rem' }}>
-  <div className="form-section">
+        <div className="form-section">
           <h3>System Settings</h3>
           <div className="form-group">
             <label>Session Reminder Threshold:</label>
@@ -68,7 +107,7 @@ const Settings = () => {
           <button className="btn btn-primary">Save Settings</button>
         </div>
 
-  <div className="form-section">
+        <div className="form-section">
           <h3>Notification Settings</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -94,79 +133,72 @@ const Settings = () => {
         </div>
       </div>
 
-  <div className="form-section">
+      <div className="form-section">
         <h3>Data Import/Export</h3>
+        {message && <div className="status-badge" style={{ marginBottom: '0.75rem' }}>{message}</div>}
         <div className="grid grid-2">
           <div className="form-section">
-            <h4>Import Data</h4>
+            <h4>Import Data (export.json)</h4>
             <form onSubmit={handleImport}>
               <div className="form-group">
-                <label>Select File (CSV/JSON):</label>
-                <input 
-                  type="file" 
+                <label>Select JSON Export:</label>
+                <input
+                  type="file"
                   className="form-control"
-                  accept=".csv,.json"
-                  onChange={(e) => setImportFile(e.target.files[0])}
+                  accept="application/json,.json"
+                  onChange={(e) => setImportFile(e.target.files?.[0] || null)}
                 />
               </div>
-              <div className="form-group">
-                <label>Data Type:</label>
-                <select className="form-control">
-                  <option value="patients">Patients</option>
-                  <option value="users">Users</option>
-                  <option value="sessions">Sessions</option>
-                  <option value="plans">Therapy Plans</option>
-                </select>
+              <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input type="checkbox" id="wipe" checked={importWipe} onChange={(e) => setImportWipe(e.target.checked)} />
+                <label htmlFor="wipe" style={{ margin: 0 }}>Wipe existing data before import</label>
               </div>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="btn btn-success"
-                disabled={!importFile || importMutation.isPending}
+                disabled={!importFile || importing}
               >
-                {importMutation.isPending ? 'Importing...' : 'Import Data'}
+                {importing ? 'Importing...' : 'Import'}
               </button>
             </form>
           </div>
-
           <div className="form-section">
-            <h4>Export Data</h4>
+            <h4>Export (CSV)</h4>
+            <p style={{ fontSize: '0.9rem', opacity: 0.8 }}>Downloads one CSV per entity (patients, users, therapy plans, sessions, progress reports).</p>
+            <button className="btn btn-primary" onClick={handleExport} disabled={exporting}>
+              {exporting ? 'Exporting...' : 'Download All CSVs'}
+            </button>
+            <hr style={{ margin: '1rem 0' }} />
+            <h4>Single Entity CSV</h4>
             <div className="form-group">
-              <label>Export Format:</label>
-              <select 
-                className="form-control"
-                value={exportFormat}
-                onChange={(e) => setExportFormat(e.target.value)}
-              >
-                <option value="csv">CSV</option>
-                <option value="json">JSON</option>
-                <option value="pdf">PDF Report</option>
+              <label>Entity:</label>
+              <select className="form-control" value={entity} onChange={e => setEntity(e.target.value)}>
+                <option value="patients">Patients</option>
+                <option value="users">Users</option>
+                <option value="therapyPlans">Therapy Plans</option>
+                <option value="sessions">Sessions</option>
+                <option value="progressReports">Progress Reports</option>
               </select>
             </div>
-            <div className="form-group">
-              <label>Include:</label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input type="checkbox" defaultChecked />
-                  Patient data
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input type="checkbox" defaultChecked />
-                  Session records
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input type="checkbox" />
-                  User information
-                </label>
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={handleExport}>
-              Export Data
-            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={async () => {
+                try {
+                  setMessage('Exporting entity...');
+                  await handleEntityCSVDownload(entity);
+                  setMessage('Entity export downloaded');
+                  resetMessageLater();
+                } catch (err) {
+                  setMessage(err.message);
+                  resetMessageLater();
+                }
+              }}
+            >Download CSV</button>
           </div>
         </div>
       </div>
 
-  <div className="form-section">
+      <div className="form-section">
         <h3>External Integrations</h3>
         <div className="grid grid-2">
           <div className="form-section">
@@ -174,17 +206,17 @@ const Settings = () => {
             <p>Connect with external hospital/clinic systems</p>
             <div className="form-group">
               <label>API Endpoint:</label>
-              <input 
-                className="form-control" 
+              <input
+                className="form-control"
                 placeholder="https://api.hospital.com/v1"
                 disabled
               />
             </div>
             <div className="form-group">
               <label>API Key:</label>
-              <input 
-                type="password" 
-                className="form-control" 
+              <input
+                type="password"
+                className="form-control"
                 placeholder="Enter API key"
                 disabled
               />
@@ -213,7 +245,7 @@ const Settings = () => {
         </div>
       </div>
 
-  <div className="form-section">
+      <div className="form-section">
         <h3>Data Management</h3>
         <div className="grid grid-3">
           <div className="form-section">

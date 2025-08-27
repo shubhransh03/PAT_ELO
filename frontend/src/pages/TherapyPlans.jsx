@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@clerk/clerk-react';
-import { apiGet, apiPost, apiPatch } from '../api';
+import { apiGet, apiPost, apiPatch, apiPut } from '../api';
 
 const TherapyPlans = () => {
   const { user } = useUser();
@@ -14,7 +14,8 @@ const TherapyPlans = () => {
   // Fetch therapy plans based on user role
   const { data: plans, isLoading } = useQuery({
     queryKey: ['therapy-plans'],
-    queryFn: () => apiGet('/api/plans', userRole === 'therapist' ? { therapist: user.id } : {}),
+    // use therapist=me so backend resolves auth user instead of clerk id mismatch
+    queryFn: () => apiGet('/api/plans', userRole === 'therapist' ? { therapist: 'me' } : {}),
   });
 
   // Fetch patients for creating new plans
@@ -34,7 +35,7 @@ const TherapyPlans = () => {
 
   // Review plan mutation
   const reviewPlanMutation = useMutation({
-    mutationFn: ({ planId, decision, comments }) => 
+    mutationFn: ({ planId, decision, comments }) =>
       apiPost(`/api/plans/${planId}/review`, { decision, comments }),
     onSuccess: () => {
       queryClient.invalidateQueries(['therapy-plans']);
@@ -53,6 +54,61 @@ const TherapyPlans = () => {
       alert('Plan created successfully!');
     },
   });
+
+  // Update (edit) plan mutation
+  const updatePlanMutation = useMutation({
+    mutationFn: ({ id, data }) => apiPut(`/api/plans/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['therapy-plans']);
+      setEditingPlan(null);
+      alert('Plan updated.');
+    }
+  });
+
+  const [editingPlan, setEditingPlan] = useState(null);
+  const [editForm, setEditForm] = useState({ goals: [], activities: [], notes: '' });
+
+  const beginEdit = (plan) => {
+    setEditingPlan(plan);
+    setEditForm({
+      goals: plan.goals?.map(g => ({ ...g })) || [],
+      activities: plan.activities?.map(a => ({ ...a })) || [],
+      notes: plan.notes || ''
+    });
+    setSelectedPlan(null); // close review if open
+  };
+
+  const updateGoalField = (idx, field, value) => {
+    setEditForm(f => {
+      const goals = [...f.goals];
+      goals[idx] = { ...goals[idx], [field]: value };
+      return { ...f, goals };
+    });
+  };
+  const addGoal = () => setEditForm(f => ({ ...f, goals: [...f.goals, { title: '', metric: '', target: 0 }] }));
+  const removeGoal = (i) => setEditForm(f => ({ ...f, goals: f.goals.filter((_, idx) => idx !== i) }));
+
+  const updateActivityField = (idx, field, value) => {
+    setEditForm(f => {
+      const activities = [...f.activities];
+      activities[idx] = { ...activities[idx], [field]: value };
+      return { ...f, activities };
+    });
+  };
+  const addActivity = () => setEditForm(f => ({ ...f, activities: [...f.activities, { name: '', frequency: '', duration: '' }] }));
+  const removeActivity = (i) => setEditForm(f => ({ ...f, activities: f.activities.filter((_, idx) => idx !== i) }));
+
+  const handleEditSubmit = (e) => {
+    e.preventDefault();
+    if (!editingPlan) return;
+    // basic cleanup: remove empty goals/activities
+    const data = {
+      goals: editForm.goals.filter(g => g.title),
+      activities: editForm.activities.filter(a => a.name),
+      notes: editForm.notes
+    };
+    updatePlanMutation.mutate({ id: editingPlan._id, data });
+  };
 
   const handleCreatePlan = (event) => {
     event.preventDefault();
@@ -91,12 +147,62 @@ const TherapyPlans = () => {
         <h1>Therapy Plans</h1>
         <div className="header-actions">
           {userRole === 'therapist' && (
-            <button 
+            <button
               className="btn btn-primary"
               onClick={() => setShowCreateForm(!showCreateForm)}
             >
               {showCreateForm ? 'Cancel' : 'Create New Plan'}
             </button>
+          )}
+          {['admin', 'supervisor'].includes(userRole) && (
+            <>
+              <button
+                className="btn btn-secondary"
+                style={{ marginLeft: '0.5rem' }}
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/data/export');
+                    if (!res.ok) throw new Error('Export failed');
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'export.json';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (e) { alert(e.message); }
+                }}
+              >Export Data</button>
+              <label className="btn" style={{ marginLeft: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="file"
+                  accept="application/json"
+                  style={{ display: 'none' }}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const text = await file.text();
+                      const json = JSON.parse(text);
+                      const res = await fetch('/api/data/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(json)
+                      });
+                      if (!res.ok) throw new Error('Import failed');
+                      const result = await res.json();
+                      alert('Import complete');
+                      queryClient.invalidateQueries(['therapy-plans']);
+                    } catch (err) {
+                      alert(err.message);
+                    } finally {
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                Import Data
+              </label>
+            </>
           )}
         </div>
       </div>
@@ -107,6 +213,7 @@ const TherapyPlans = () => {
           <form onSubmit={handleCreatePlan}>
             <div className="form-group">
               <label>Patient:</label>
+
               <select name="patient" className="form-control" required>
                 <option value="">Select patient...</option>
                 {patients?.data?.map(patient => (
@@ -197,16 +304,25 @@ const TherapyPlans = () => {
                   <td>{new Date(plan.createdAt).toLocaleDateString()}</td>
                   <td>
                     {plan.status === 'draft' && userRole === 'therapist' && (
-                      <button 
-                        className="btn btn-primary"
-                        onClick={() => submitPlanMutation.mutate(plan._id)}
-                        disabled={submitPlanMutation.isPending}
-                      >
-                        Submit
-                      </button>
+                      <>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ marginRight: '0.5rem' }}
+                          onClick={() => beginEdit(plan)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => submitPlanMutation.mutate(plan._id)}
+                          disabled={submitPlanMutation.isPending}
+                        >
+                          Submit
+                        </button>
+                      </>
                     )}
                     {plan.status === 'submitted' && userRole === 'supervisor' && (
-                      <button 
+                      <button
                         className="btn btn-secondary"
                         onClick={() => setSelectedPlan(plan)}
                       >
@@ -220,6 +336,85 @@ const TherapyPlans = () => {
           </table>
         )}
       </div>
+
+      {editingPlan && (
+        <div className="form-section">
+          <h3>Edit Plan for {editingPlan.patient?.name}</h3>
+          <form onSubmit={handleEditSubmit}>
+            <h4>Goals</h4>
+            {editForm.goals.map((g, i) => (
+              <div key={i} className="grid grid-3" style={{ gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <input
+                  className="form-control"
+                  placeholder="Title"
+                  value={g.title}
+                  onChange={e => updateGoalField(i, 'title', e.target.value)}
+                  required
+                />
+                <input
+                  className="form-control"
+                  placeholder="Metric"
+                  value={g.metric}
+                  onChange={e => updateGoalField(i, 'metric', e.target.value)}
+                />
+                <input
+                  className="form-control"
+                  type="number"
+                  placeholder="Target"
+                  value={g.target}
+                  onChange={e => updateGoalField(i, 'target', Number(e.target.value))}
+                />
+                <button type="button" className="btn btn-danger" onClick={() => removeGoal(i)}>X</button>
+              </div>
+            ))}
+            <button type="button" className="btn btn-secondary" onClick={addGoal} style={{ marginBottom: '1rem' }}>+ Goal</button>
+
+            <h4>Activities</h4>
+            {editForm.activities.map((a, i) => (
+              <div key={i} className="grid grid-3" style={{ gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <input
+                  className="form-control"
+                  placeholder="Name"
+                  value={a.name}
+                  onChange={e => updateActivityField(i, 'name', e.target.value)}
+                  required
+                />
+                <input
+                  className="form-control"
+                  placeholder="Frequency"
+                  value={a.frequency}
+                  onChange={e => updateActivityField(i, 'frequency', e.target.value)}
+                />
+                <input
+                  className="form-control"
+                  placeholder="Duration"
+                  value={a.duration}
+                  onChange={e => updateActivityField(i, 'duration', e.target.value)}
+                />
+                <button type="button" className="btn btn-danger" onClick={() => removeActivity(i)}>X</button>
+              </div>
+            ))}
+            <button type="button" className="btn btn-secondary" onClick={addActivity} style={{ marginBottom: '1rem' }}>+ Activity</button>
+
+            <div className="form-group">
+              <label>Notes</label>
+              <textarea
+                className="form-control"
+                rows="3"
+                value={editForm.notes}
+                onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button type="submit" className="btn btn-success" disabled={updatePlanMutation.isPending}>
+                {updatePlanMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingPlan(null)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {selectedPlan && (
         <div className="form-section">
@@ -244,7 +439,7 @@ const TherapyPlans = () => {
           )}
           <div className="form-group">
             <label>Comments:</label>
-            <textarea 
+            <textarea
               className="form-control"
               value={reviewComment}
               onChange={(e) => setReviewComment(e.target.value)}
@@ -252,29 +447,29 @@ const TherapyPlans = () => {
             />
           </div>
           <div style={{ display: 'flex', gap: '1rem' }}>
-            <button 
+            <button
               className="btn btn-success"
-              onClick={() => reviewPlanMutation.mutate({ 
-                planId: selectedPlan._id, 
-                decision: 'approved', 
-                comments: reviewComment 
+              onClick={() => reviewPlanMutation.mutate({
+                planId: selectedPlan._id,
+                decision: 'approved',
+                comments: reviewComment
               })}
               disabled={reviewPlanMutation.isPending}
             >
               Approve
             </button>
-            <button 
+            <button
               className="btn btn-danger"
-              onClick={() => reviewPlanMutation.mutate({ 
-                planId: selectedPlan._id, 
-                decision: 'needs_revision', 
-                comments: reviewComment 
+              onClick={() => reviewPlanMutation.mutate({
+                planId: selectedPlan._id,
+                decision: 'needs_revision',
+                comments: reviewComment
               })}
               disabled={reviewPlanMutation.isPending}
             >
               Request Revision
             </button>
-            <button 
+            <button
               className="btn btn-secondary"
               onClick={() => setSelectedPlan(null)}
             >

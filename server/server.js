@@ -13,6 +13,7 @@ import assignmentRoutes from "./src/routes/assignments.js";
 import userRoutes from "./src/routes/users.js";
 import notificationRoutes from "./src/routes/notifications.js";
 import analyticsRoutes from "./src/routes/analytics.js";
+import dataRoutes from "./src/routes/data.js";
 
 dotenv.config();
 const app = express();
@@ -24,8 +25,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // Health check
-app.get("/health", (_req, res) => res.json({ 
-  ok: true, 
+app.get("/health", (_req, res) => res.json({
+  ok: true,
   timestamp: new Date().toISOString(),
   environment: process.env.NODE_ENV || 'development'
 }));
@@ -40,6 +41,7 @@ app.use("/api/ratings", ratingRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/data", dataRoutes);
 
 // Legacy dashboard route (for backwards compatibility)
 app.get("/api/dashboard", async (req, res) => {
@@ -57,7 +59,7 @@ app.use('*', (req, res) => {
 // Error handling middleware
 const errorHandler = (err, req, res, next) => {
   console.error('Error:', err);
-  
+
   // MongoDB validation errors
   if (err.name === 'ValidationError') {
     const errors = Object.values(err.errors).map(e => e.message);
@@ -66,7 +68,7 @@ const errorHandler = (err, req, res, next) => {
       messages: errors
     });
   }
-  
+
   // MongoDB duplicate key error
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
@@ -75,7 +77,7 @@ const errorHandler = (err, req, res, next) => {
       message: `${field} already exists`
     });
   }
-  
+
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
@@ -83,7 +85,7 @@ const errorHandler = (err, req, res, next) => {
       message: 'Authentication failed'
     });
   }
-  
+
   // Default error
   res.status(err.status || 500).json({
     error: err.message || 'Internal Server Error',
@@ -95,28 +97,61 @@ app.use(errorHandler);
 
 const port = process.env.PORT || 4000;
 const mongoUri = process.env.MONGODB_URI;
+const skipDb = (process.env.SKIP_DB || '').toLowerCase() === 'true' || process.env.SKIP_DB === '1';
 
-if (!mongoUri) {
-  console.error('MONGODB_URI environment variable is required');
-  process.exit(1);
+// Start server listener (factored so we can call after DB ready OR immediately if skipping DB)
+function startHttpServer() {
+  if (app.locals.serverStarted) return; // idempotent
+  app.locals.serverStarted = true;
+  app.listen(port, () => {
+    console.log(`API server running on port ${port}`);
+    console.log(`Health: http://localhost:${port}/health`);
+    if (skipDb) {
+      console.warn('⚠️  Server started WITHOUT a MongoDB connection (SKIP_DB enabled).');
+    }
+  });
 }
 
-mongoose
-  .connect(mongoUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => {
-    console.log('Connected to MongoDB');
-    app.listen(port, () => {
-      console.log(`API server running on port ${port}`);
-      console.log(`Health check: http://localhost:${port}/health`);
-    });
-  })
-  .catch(err => {
-    console.error("MongoDB connection error:", err);
+async function connectWithRetry(maxRetries = 30, delayMs = 5000) {
+  if (!mongoUri) {
+    if (skipDb) {
+      console.warn('⚠️  No MONGODB_URI provided but SKIP_DB is set. Continuing without DB.');
+      startHttpServer();
+      return;
+    }
+    console.error('MONGODB_URI environment variable is required (or set SKIP_DB=true to bypass).');
     process.exit(1);
-  });
+  }
+
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      console.log(`Connecting to MongoDB (attempt ${attempt}/${maxRetries}) ...`);
+      await mongoose.connect(mongoUri, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      });
+      console.log('✅ Connected to MongoDB');
+      startHttpServer();
+      return;
+    } catch (err) {
+      console.error(`MongoDB connection failed (attempt ${attempt}):`, err.message);
+      if (attempt >= maxRetries) {
+        if (skipDb) {
+          console.warn('Proceeding without DB after max retries due to SKIP_DB flag.');
+          startHttpServer();
+          return;
+        }
+        console.error('Exceeded maximum MongoDB connection attempts. Exiting.');
+        process.exit(1);
+      }
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
+connectWithRetry();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
