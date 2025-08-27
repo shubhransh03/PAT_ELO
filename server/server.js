@@ -11,6 +11,8 @@ import reportRoutes from "./src/routes/reports.js";
 import ratingRoutes from "./src/routes/ratings.js";
 import assignmentRoutes from "./src/routes/assignments.js";
 import userRoutes from "./src/routes/users.js";
+import notificationRoutes from "./src/routes/notifications.js";
+import analyticsRoutes from "./src/routes/analytics.js";
 
 dotenv.config();
 const app = express();
@@ -36,6 +38,13 @@ app.use("/api/sessions", sessionRoutes);
 app.use("/api/progress-reports", reportRoutes);
 app.use("/api/ratings", ratingRoutes);
 app.use("/api/assignments", assignmentRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/analytics", analyticsRoutes);
+
+// Legacy dashboard route (for backwards compatibility)
+app.get("/api/dashboard", async (req, res) => {
+  res.redirect("/api/analytics/dashboard");
+});
 
 // 404 handler
 app.use('*', (req, res) => {

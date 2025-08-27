@@ -1,11 +1,25 @@
+import { useAuth } from '@clerk/clerk-react';
+
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+
+// Create a function to get auth token (will be called from components)
+let getAuthToken = null;
+
+export function setAuthTokenGetter(tokenGetter) {
+  getAuthToken = tokenGetter;
+}
 
 export async function apiCall(path, options = {}) {
   const url = `${API_BASE}${path}`;
+  
+  // Get auth token if available
+  const token = getAuthToken ? await getAuthToken() : null;
+  
   const config = {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
       ...options.headers,
     },
     ...options,

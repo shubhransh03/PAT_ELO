@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@clerk/clerk-react';
 import { apiGet, apiPost } from '../api';
+import ProgressReportTable from '../components/ProgressReportTable';
 
 const ProgressReports = () => {
   const { user } = useUser();
@@ -9,6 +10,7 @@ const ProgressReports = () => {
   const [showReportForm, setShowReportForm] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
   const [feedback, setFeedback] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
   const queryClient = useQueryClient();
 
   // Fetch progress reports
@@ -64,29 +66,36 @@ const ProgressReports = () => {
     submitReportMutation.mutate(reportData);
   };
 
-  if (isLoading) return <div className="loading">Loading progress reports...</div>;
+  if (isLoading) return (
+    <div className="loading-container">
+      <div className="loading-spinner"></div>
+      <div className="loading-text">Loading progress reports...</div>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h2>Progress Reports</h2>
-        {userRole === 'therapist' && (
-          <button 
-            className="btn btn-primary"
-            onClick={() => setShowReportForm(!showReportForm)}
-          >
-            {showReportForm ? 'Cancel' : 'Create Report'}
-          </button>
-        )}
+    <div className="page-container">
+      <div className="page-header">
+        <h1>Progress Reports</h1>
+        <div className="header-actions">
+          {userRole === 'therapist' && (
+            <button 
+              className="btn btn-primary"
+              onClick={() => setShowReportForm(!showReportForm)}
+            >
+              {showReportForm ? 'Cancel' : 'Create Report'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Reminder card for overdue reports */}
-      <div className="card" style={{ marginBottom: '2rem', background: '#fff3cd', border: '1px solid #ffeaa7' }}>
-        <h3 style={{ color: '#856404' }}>📝 Report Reminders</h3>
-        <p style={{ color: '#856404' }}>
+      <div className="form-section" style={{ background: 'var(--color-warning-light)' }}>
+        <h3 style={{ color: '#92400e' }}>📝 Report Reminders</h3>
+        <p style={{ color: '#92400e' }}>
           The following patients have completed 10+ sessions and are due for progress reports:
         </p>
-        <ul style={{ color: '#856404' }}>
+        <ul style={{ color: '#92400e' }}>
           {eligiblePatients?.data?.slice(0, 3).map(patient => (
             <li key={patient._id}>
               {patient.name} - {patient.sessionCount || 0} sessions completed
@@ -96,7 +105,7 @@ const ProgressReports = () => {
       </div>
 
       {showReportForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
+        <div className="form-section">
           <h3>Create Progress Report</h3>
           <form onSubmit={handleSubmitReport}>
             <div className="grid grid-2">
@@ -167,54 +176,61 @@ const ProgressReports = () => {
         </div>
       )}
 
-      <div className="card">
-        <h3>Progress Reports</h3>
+      <div className="data-table-container">
+        {selectedIds.length > 0 && (
+          <div className="form-actions" style={{ justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <div><strong>{selectedIds.length}</strong> selected</div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  const selected = (reports?.data || []).filter((r) => selectedIds.includes(r._id));
+                  const rows = selected.map((r) => ({
+                    id: r._id,
+                    patient: r.patient?.name || 'Unknown',
+                    sessions: r.sessionCount,
+                    status: r.reviewedAt ? 'Reviewed' : 'Pending Review',
+                    submitted: new Date(r.submittedAt).toISOString(),
+                  }));
+                  if (rows.length === 0) return;
+                  const header = Object.keys(rows[0]).join(',');
+                  const csv = [header, ...rows.map(v => Object.values(v).map(x => `"${String(x).replaceAll('"', '""')}"`).join(','))].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `progress_reports_${new Date().toISOString().slice(0,10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >Export Selected (CSV)</button>
+              <button className="btn btn-sm" onClick={() => setSelectedIds([])}>Clear</button>
+            </div>
+          </div>
+        )}
         {!reports?.data?.length ? (
-          <p>No progress reports found.</p>
+          <div className="data-table-empty">
+            <div className="empty-icon">📑</div>
+            <h3>No Progress Reports</h3>
+            <p>Create a report to review patient progress.</p>
+          </div>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Patient</th>
-                <th>Sessions</th>
-                <th>Status</th>
-                <th>Submitted</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.data.map(report => (
-                <tr key={report._id}>
-                  <td>{report.patient?.name || 'Unknown'}</td>
-                  <td>{report.sessionCount}</td>
-                  <td>
-                    <span className={`status-badge ${report.reviewedAt ? 'status-approved' : 'status-submitted'}`}>
-                      {report.reviewedAt ? 'Reviewed' : 'Pending Review'}
-                    </span>
-                  </td>
-                  <td>{new Date(report.submittedAt).toLocaleDateString()}</td>
-                  <td>
-                    {!report.reviewedAt && userRole === 'supervisor' && (
-                      <button 
-                        className="btn btn-secondary"
-                        onClick={() => setSelectedReport(report)}
-                      >
-                        Review
-                      </button>
-                    )}
-                    {report.reviewedAt && (
-                      <span className="status-badge status-approved">✓ Reviewed</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ProgressReportTable
+            rows={(reports?.data || []).map(r => ({
+              id: r._id,
+              patient: r.patient?.name || 'Unknown',
+              sessions: r.sessionCount,
+              reviewed: Boolean(r.reviewedAt),
+              submitted: new Date(r.submittedAt).toLocaleDateString(),
+            }))}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+          />
         )}
       </div>
 
       {selectedReport && (
-        <div className="card" style={{ marginTop: '2rem' }}>
+        <div className="form-section">
           <h3>Review Report for {selectedReport.patient?.name}</h3>
           
           <div style={{ marginBottom: '1rem' }}>
@@ -226,18 +242,18 @@ const ProgressReports = () => {
             ))}
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <h4>Narrative:</h4>
-            <p style={{ background: '#f8f9fa', padding: '1rem', borderRadius: '4px' }}>
-              {selectedReport.narrative}
-            </p>
+          <div className="form-group">
+            <label>Narrative:</label>
+            <div className="empty-state" style={{ textAlign: 'left' }}>
+              <p style={{ margin: 0 }}>{selectedReport.narrative}</p>
+            </div>
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <h4>Recommendation:</h4>
-            <p style={{ background: '#f8f9fa', padding: '1rem', borderRadius: '4px' }}>
-              {selectedReport.recommendation}
-            </p>
+          <div className="form-group">
+            <label>Recommendation:</label>
+            <div className="empty-state" style={{ textAlign: 'left' }}>
+              <p style={{ margin: 0 }}>{selectedReport.recommendation}</p>
+            </div>
           </div>
 
           <div className="form-group">
@@ -269,7 +285,7 @@ const ProgressReports = () => {
               Cancel
             </button>
           </div>
-        </div>
+  </div>
       )}
     </div>
   );

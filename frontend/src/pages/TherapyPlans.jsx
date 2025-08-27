@@ -78,24 +78,31 @@ const TherapyPlans = () => {
     createPlanMutation.mutate(planData);
   };
 
-  if (isLoading) return <div className="loading">Loading therapy plans...</div>;
+  if (isLoading) return (
+    <div className="loading-container">
+      <div className="loading-spinner"></div>
+      <div className="loading-text">Loading therapy plans...</div>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h2>Therapy Plans</h2>
-        {userRole === 'therapist' && (
-          <button 
-            className="btn btn-primary"
-            onClick={() => setShowCreateForm(!showCreateForm)}
-          >
-            {showCreateForm ? 'Cancel' : 'Create New Plan'}
-          </button>
-        )}
+    <div className="page-container">
+      <div className="page-header">
+        <h1>Therapy Plans</h1>
+        <div className="header-actions">
+          {userRole === 'therapist' && (
+            <button 
+              className="btn btn-primary"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+            >
+              {showCreateForm ? 'Cancel' : 'Create New Plan'}
+            </button>
+          )}
+        </div>
       </div>
 
       {showCreateForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
+        <div className="form-section">
           <h3>Create New Therapy Plan</h3>
           <form onSubmit={handleCreatePlan}>
             <div className="form-group">
@@ -159,12 +166,15 @@ const TherapyPlans = () => {
         </div>
       )}
 
-      <div className="card">
-        <h3>Therapy Plans</h3>
+      <div className="data-table-container">
         {!plans?.data?.length ? (
-          <p>No therapy plans found.</p>
+          <div className="data-table-empty">
+            <div className="empty-icon">📄</div>
+            <h3>No Therapy Plans</h3>
+            <p>Create a plan to get started.</p>
+          </div>
         ) : (
-          <table className="table">
+          <table className="data-table">
             <thead>
               <tr>
                 <th>Patient</th>
@@ -212,7 +222,7 @@ const TherapyPlans = () => {
       </div>
 
       {selectedPlan && (
-        <div className="card" style={{ marginTop: '2rem' }}>
+        <div className="form-section">
           <h3>Review Plan for {selectedPlan.patient?.name}</h3>
           <div style={{ marginBottom: '1rem' }}>
             <h4>Goals:</h4>

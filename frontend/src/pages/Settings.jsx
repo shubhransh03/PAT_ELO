@@ -41,11 +41,13 @@ const Settings = () => {
   };
 
   return (
-    <div>
-      <h2>Settings & Integrations</h2>
+    <div className="page-container">
+      <div className="page-header">
+        <h1>Settings & Integrations</h1>
+      </div>
 
       <div className="grid grid-2" style={{ marginBottom: '2rem' }}>
-        <div className="card">
+  <div className="form-section">
           <h3>System Settings</h3>
           <div className="form-group">
             <label>Session Reminder Threshold:</label>
@@ -66,7 +68,7 @@ const Settings = () => {
           <button className="btn btn-primary">Save Settings</button>
         </div>
 
-        <div className="card">
+  <div className="form-section">
           <h3>Notification Settings</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -92,10 +94,10 @@ const Settings = () => {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: '2rem' }}>
+  <div className="form-section">
         <h3>Data Import/Export</h3>
         <div className="grid grid-2">
-          <div>
+          <div className="form-section">
             <h4>Import Data</h4>
             <form onSubmit={handleImport}>
               <div className="form-group">
@@ -126,7 +128,7 @@ const Settings = () => {
             </form>
           </div>
 
-          <div>
+          <div className="form-section">
             <h4>Export Data</h4>
             <div className="form-group">
               <label>Export Format:</label>
@@ -164,10 +166,10 @@ const Settings = () => {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: '2rem' }}>
+  <div className="form-section">
         <h3>External Integrations</h3>
         <div className="grid grid-2">
-          <div className="card">
+          <div className="form-section">
             <h4>Hospital System Integration</h4>
             <p>Connect with external hospital/clinic systems</p>
             <div className="form-group">
@@ -192,7 +194,7 @@ const Settings = () => {
             </button>
           </div>
 
-          <div className="card">
+          <div className="form-section">
             <h4>Billing System Integration</h4>
             <p>Sync with billing and insurance systems</p>
             <div className="form-group">
@@ -211,10 +213,10 @@ const Settings = () => {
         </div>
       </div>
 
-      <div className="card">
+  <div className="form-section">
         <h3>Data Management</h3>
         <div className="grid grid-3">
-          <div className="card">
+          <div className="form-section">
             <h4>Backup</h4>
             <p>Create a backup of all system data</p>
             <button className="btn btn-primary" onClick={handleBackup}>
@@ -222,7 +224,7 @@ const Settings = () => {
             </button>
           </div>
 
-          <div className="card">
+          <div className="form-section">
             <h4>Database Stats</h4>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               <li>Patients: <strong>156</strong></li>
@@ -232,7 +234,7 @@ const Settings = () => {
             </ul>
           </div>
 
-          <div className="card">
+          <div className="form-section">
             <h4>System Health</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>

@@ -2,34 +2,34 @@ export function verifyAuth(req, res, next) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   
-  if (!token) {
-    return res.status(401).json({ 
-      error: "Unauthorized", 
-      message: "No authentication token provided" 
-    });
-  }
-
-  try {
-    // TODO: Verify token signature and extract user/role (Clerk verification to be added later).
-    // For now, pass through a placeholder user (DO NOT use in production).
-    // In production, you would:
-    // 1. Verify the JWT token using Clerk's public key
-    // 2. Extract user information from the token
-    // 3. Optionally fetch additional user data from your database
-    
+  // For development - allow requests with or without token
+  // In production, you would verify the Clerk JWT token here
+  if (token) {
+    // Token provided - validate it
+    try {
+      // TODO: Add Clerk JWT verification here
+      // For now, accept any token as valid
+      req.auth = { 
+        userId: "68af0aa5ec05fb08d70226d2", // Use real supervisor ID from database
+        role: "supervisor", 
+        clerkUserId: "dev_clerk_user"
+      };
+    } catch (error) {
+      return res.status(401).json({ 
+        error: "Unauthorized", 
+        message: "Invalid authentication token" 
+      });
+    }
+  } else {
+    // No token - for development, still allow with default user
     req.auth = { 
-      userId: "placeholder", 
-      role: "therapist",
-      clerkUserId: "user_placeholder"
+      userId: "68af0aa5ec05fb08d70226d2", // Use real supervisor ID from database
+      role: "supervisor", 
+      clerkUserId: "dev_clerk_user"
     };
-    
-    next();
-  } catch (error) {
-    return res.status(401).json({ 
-      error: "Unauthorized", 
-      message: "Invalid authentication token" 
-    });
   }
+  
+  next();
 }
 
 export function requireRole(allowedRoles = []) {

@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api';
+import SessionTable from '../components/SessionTable';
 
 const Sessions = () => {
   const [showSessionForm, setShowSessionForm] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
   const queryClient = useQueryClient();
 
   // Fetch sessions
@@ -49,22 +51,29 @@ const Sessions = () => {
     createSessionMutation.mutate(sessionData);
   };
 
-  if (isLoading) return <div className="loading">Loading sessions...</div>;
+  if (isLoading) return (
+    <div className="loading-container">
+      <div className="loading-spinner"></div>
+      <div className="loading-text">Loading sessions...</div>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h2>Session Documentation</h2>
-        <button 
-          className="btn btn-primary"
-          onClick={() => setShowSessionForm(!showSessionForm)}
-        >
-          {showSessionForm ? 'Cancel' : 'Log New Session'}
-        </button>
+    <div className="page-container">
+      <div className="page-header">
+        <h1>Session Documentation</h1>
+        <div className="header-actions">
+          <button 
+            className="btn btn-primary"
+            onClick={() => setShowSessionForm(!showSessionForm)}
+          >
+            {showSessionForm ? 'Cancel' : 'Log New Session'}
+          </button>
+        </div>
       </div>
 
       {showSessionForm && (
-        <div className="card" style={{ marginBottom: '2rem' }}>
+        <div className="form-section">
           <h3>Log New Session</h3>
           <form onSubmit={handleLogSession}>
             <div className="grid grid-2">
@@ -135,41 +144,68 @@ const Sessions = () => {
         </div>
       )}
 
-      <div className="card">
-        <h3>Recent Sessions</h3>
+      <div className="data-table-container">
+        {selectedIds.length > 0 && (
+          <div className="form-actions" style={{ justifyContent: 'space-between', marginBottom: '1rem' }}>
+            <div>
+              <strong>{selectedIds.length}</strong> selected
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  const selected = (sessions?.data || []).filter((s) => selectedIds.includes(s._id));
+                  const rows = selected.map((s) => ({
+                    id: s._id,
+                    patient: s.patient?.name || 'Unknown',
+                    date: new Date(s.date).toISOString(),
+                    durationMin: s.durationMin,
+                    activities: Array.isArray(s.activities) ? s.activities.join('; ') : '',
+                    outcomes: Array.isArray(s.outcomes) ? s.outcomes.map(o => `${o.metric}:${o.value}`).join('|') : '',
+                  }));
+                  if (rows.length === 0) return;
+                  const header = Object.keys(rows[0]).join(',');
+                  const csv = [header, ...rows.map(r => Object.values(r).map(v => `"${String(v).replaceAll('"', '""')}"`).join(','))].join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `sessions_export_${new Date().toISOString().slice(0,10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                Export Selected (CSV)
+              </button>
+              <button className="btn btn-sm" onClick={() => setSelectedIds([])}>Clear</button>
+            </div>
+          </div>
+        )}
         {!sessions?.data?.length ? (
-          <p>No sessions found.</p>
+          <div className="data-table-empty">
+            <div className="empty-icon">🗓️</div>
+            <h3>No Sessions Yet</h3>
+            <p>Log your first session to see it here.</p>
+          </div>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Patient</th>
-                <th>Date</th>
-                <th>Duration</th>
-                <th>Activities</th>
-                <th>Outcomes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.data.map(session => (
-                <tr key={session._id}>
-                  <td>{session.patient?.name || 'Unknown'}</td>
-                  <td>{new Date(session.date).toLocaleDateString()}</td>
-                  <td>{session.durationMin} min</td>
-                  <td>{session.activities?.slice(0, 2).join(', ')}...</td>
-                  <td>
-                    {session.outcomes?.map(outcome => 
-                      `${outcome.metric}: ${outcome.value}`
-                    ).join(', ')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <SessionTable
+            rows={sessions.data.map((s) => ({
+              id: s._id,
+              patientName: s.patient?.name || 'Unknown',
+              date: new Date(s.date).toLocaleDateString(),
+              duration: `${s.durationMin} min`,
+              activities: Array.isArray(s.activities) ? s.activities.join(', ') : '',
+              outcomes: Array.isArray(s.outcomes)
+                ? s.outcomes.map(o => `${o.metric}: ${o.value}`).join(', ')
+                : '',
+            }))}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+          />
         )}
       </div>
 
-      <div className="card" style={{ marginTop: '2rem' }}>
+    <div className="form-section" style={{ marginTop: '2rem' }}>
         <h3>Progress Visualization</h3>
         <div className="form-group">
           <label>Select Patient for Progress Chart:</label>
@@ -187,11 +223,10 @@ const Sessions = () => {
           </select>
         </div>
         {selectedPatient && (
-          <div style={{ padding: '2rem', textAlign: 'center', background: '#f8f9fa', borderRadius: '4px' }}>
-            <p>Progress chart for selected patient would be displayed here</p>
-            <p style={{ fontSize: '0.9rem', color: '#666' }}>
-              (Chart.js or similar library would render actual progress data)
-            </p>
+          <div className="empty-state">
+            <div className="empty-icon">📈</div>
+            <h3>Progress Chart Placeholder</h3>
+            <p>(Chart.js or similar library would render actual progress data)</p>
           </div>
         )}
       </div>
