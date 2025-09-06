@@ -135,9 +135,22 @@ const TherapyPlans = () => {
   };
 
   if (isLoading) return (
-    <div className="loading-container">
-      <div className="loading-spinner"></div>
-      <div className="loading-text">Loading therapy plans...</div>
+    <div className="page-container" aria-busy="true" aria-label="Loading therapy plans">
+      <div className="page-header" style={{opacity: .7}}>
+        <div style={{height: 32, width: 260}} className="skeleton" />
+        <div style={{height: 16, width: 460, marginTop: 10}} className="skeleton" />
+      </div>
+      <div className="metrics-grid">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="metric-card" aria-hidden>
+            <div className="skeleton" style={{width: '100%', height: 96, borderRadius: 12}} />
+          </div>
+        ))}
+      </div>
+      <div className="dashboard-section">
+        <div className="skeleton" style={{height: 24, width: 220, marginBottom: 16}} />
+        <div className="skeleton" style={{height: 180, width: '100%', borderRadius: 12}} />
+      </div>
     </div>
   );
 

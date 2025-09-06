@@ -52,9 +52,15 @@ const Sessions = () => {
   };
 
   if (isLoading) return (
-    <div className="loading-container">
-      <div className="loading-spinner"></div>
-      <div className="loading-text">Loading sessions...</div>
+    <div className="page-container" aria-busy="true" aria-label="Loading sessions">
+      <div className="page-header" style={{opacity: .7}}>
+        <div style={{height: 32, width: 240}} className="skeleton" />
+        <div style={{height: 16, width: 400, marginTop: 10}} className="skeleton" />
+      </div>
+      <div className="dashboard-section">
+        <div className="skeleton" style={{height: 36, width: 280, marginBottom: 12}} />
+        <div className="skeleton" style={{height: 240, width: '100%', borderRadius: 12}} />
+      </div>
     </div>
   );
 

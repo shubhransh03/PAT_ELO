@@ -32,6 +32,12 @@
 .data-table thead {
   background: linear-gradient(135deg, var(--color-gray-50), rgba(248, 250, 252, 0.8));
   position: relative;
+    caption {
+      text-align: left;
+      padding: 12px 16px;
+      color: #64748b;
+      font-size: 0.9rem;
+    }
 }
 
 .data-table th {

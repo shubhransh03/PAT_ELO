@@ -6,7 +6,10 @@ const DataTable = ({
   columns = [], 
   loading = false, 
   onRowClick = null,
-  pagination = null 
+  pagination = null,
+  caption = 'Data table',
+  sortState = null, // { key, direction: 'asc' | 'desc' }
+  onSort = null,
 }) => {
   if (loading) {
     return (
@@ -25,16 +28,54 @@ const DataTable = ({
     );
   }
 
+  const onRowKeyDown = (e, row) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onRowClick && onRowClick(row);
+    }
+  };
+
+  const getSortAria = (col) => {
+    if (!sortState || sortState.key !== col.key) return 'none';
+    return sortState.direction === 'asc' ? 'ascending' : 'descending';
+  };
+
   return (
     <div className="data-table-container">
       <table className="data-table">
+        <caption>{caption}</caption>
         <thead>
           <tr>
-            {columns.map((column, index) => (
-              <th key={index} className={column.className || ''}>
-                {column.header}
-              </th>
-            ))}
+            {columns.map((column, index) => {
+              const isSortable = !!onSort && !!column.key;
+              const ariaSort = getSortAria(column);
+              return (
+                <th
+                  key={index}
+                  scope="col"
+                  className={column.className || ''}
+                  aria-sort={ariaSort}
+                >
+                  {isSortable ? (
+                    <button
+                      type="button"
+                      className="th-sort"
+                      aria-label={`Sort by ${column.header}`}
+                      onClick={() => onSort(column.key)}
+                    >
+                      {column.header}
+                      {sortState?.key === column.key && (
+                        <span aria-hidden="true" className="sort-indicator">
+                          {sortState.direction === 'asc' ? ' ▲' : ' ▼'}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    column.header
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -42,7 +83,10 @@ const DataTable = ({
             <tr 
               key={rowIndex} 
               onClick={() => onRowClick && onRowClick(row)}
+              onKeyDown={(e) => onRowKeyDown(e, row)}
               className={onRowClick ? 'clickable' : ''}
+              tabIndex={onRowClick ? 0 : -1}
+              role={onRowClick ? 'button' : undefined}
             >
               {columns.map((column, colIndex) => (
                 <td key={colIndex} className={column.className || ''}>

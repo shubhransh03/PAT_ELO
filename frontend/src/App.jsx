@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   SignedIn,
   SignedOut,
@@ -6,7 +6,7 @@ import {
   SignUpButton,
   UserButton,
 } from "@clerk/clerk-react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import Navigation from "./components/Navigation";
@@ -54,6 +54,9 @@ const queryClient = new QueryClient({
 
 function App() {
   const [selectedRole, setSelectedRole] = useState('therapist');
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'auto');
+  const mainRef = useRef(null);
+  const location = typeof window !== 'undefined' ? window.location : null;
   const roles = [
     { key: 'patient', label: 'Patient', icon: '🧍' },
     { key: 'therapist', label: 'Therapist', icon: '💬' },
@@ -80,6 +83,27 @@ function App() {
     el.style.setProperty('--px', `50%`);
     el.style.setProperty('--py', `50%`);
   };
+  // Apply theme to document on mount and when theme changes
+  useEffect(() => {
+    const root = document.documentElement;
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const mode = theme === 'auto' ? (prefersDark ? 'dark' : 'light') : theme;
+    root.setAttribute('data-theme', mode);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Focus main content on route change for screen readers
+  const RouteFocus = () => {
+    const loc = useLocation();
+    useEffect(() => {
+      if (mainRef.current) {
+        mainRef.current.setAttribute('tabindex', '-1');
+        mainRef.current.focus({ preventScroll: false });
+      }
+    }, [loc.pathname]);
+    return null;
+  };
+
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -160,7 +184,21 @@ function App() {
                 <div className="app-layout">
                   <Navigation />
                   <ServerStatusBanner />
-                  <main className="main-content">
+                  <main id="main-content" ref={mainRef} className="main-content" role="main">
+                    <div className="theme-toggle">
+                      <label htmlFor="theme-select" className="visually-hidden">Theme</label>
+                      <select
+                        id="theme-select"
+                        aria-label="Theme selection"
+                        value={theme}
+                        onChange={(e) => setTheme(e.target.value)}
+                      >
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                    </div>
+                    <RouteFocus />
                     <React.Suspense fallback={<div style={{ padding: 24 }}>Loading...</div>}>
                       <Routes>
                         <Route path="/" element={<Dashboard />} />

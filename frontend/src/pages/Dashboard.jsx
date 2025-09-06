@@ -21,9 +21,23 @@ const Dashboard = () => {
 
   if (isLoading) {
     return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <div className="loading-text">Loading dashboard...</div>
+      <div className="page-container" aria-busy="true" aria-label="Loading dashboard">
+        <div className="page-header" style={{opacity: .7}}>
+          <div style={{height: 32, width: 220}} className="skeleton" />
+          <div style={{height: 18, width: 420, marginTop: 8}} className="skeleton" />
+        </div>
+        <div className="metrics-grid">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="metric-card" aria-hidden>
+              <div className="skeleton" style={{width: 80, height: 80, borderRadius: 12}} />
+              <div style={{flex: 1}}>
+                <div className="skeleton" style={{width: 120, height: 14, marginBottom: 10}} />
+                <div className="skeleton" style={{width: 80, height: 28, marginBottom: 8}} />
+                <div className="skeleton" style={{width: 140, height: 12}} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
