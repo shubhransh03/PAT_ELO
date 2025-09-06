@@ -15,4 +15,9 @@ const ProgressReportSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for report lookups
+ProgressReportSchema.index({ therapist: 1, submittedAt: -1 });
+ProgressReportSchema.index({ patient: 1, submittedAt: -1 });
+ProgressReportSchema.index({ createdAt: -1 });
+
 export default mongoose.model("ProgressReport", ProgressReportSchema);

@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import TherapyPlan from "../models/TherapyPlan.js";
 import User from "../models/User.js";
 import { verifyAuth } from "../middleware/verifyAuth.js";
+import { z, validateBody } from "../middleware/validate.js";
+import { ok, fail, created } from "../middleware/respond.js";
 
 const router = Router();
 router.use(verifyAuth);
@@ -32,6 +34,8 @@ async function resolveTherapistId(raw) {
 
 router.get("/", async (req, res) => {
   try {
+    const skipDb = (process.env.SKIP_DB || '').toLowerCase() === 'true' || process.env.SKIP_DB === '1';
+  if (skipDb) return ok(res, { data: [], total: 0 });
     const { patient, therapist, status, limit = 20, page = 1 } = req.query;
     const filter = {};
     if (patient) filter.patient = patient; // assume UI sends ObjectId for patient
@@ -53,16 +57,51 @@ router.get("/", async (req, res) => {
       .limit(Number(limit))
       .sort({ updatedAt: -1 })
       .populate('patient', 'name')
-      .populate('therapist', 'name email');
+      .populate('therapist', 'name email')
+      .select('patient therapist status updatedAt submittedAt reviewedAt')
+      .lean();
 
-    const total = await TherapyPlan.countDocuments(filter);
-    res.json({ data: docs, total });
+  const total = await TherapyPlan.countDocuments(filter);
+  const pages = Math.ceil(total / Number(limit)) || 0;
+  return ok(res, { data: docs, pagination: { page: Number(page), limit: Number(limit), total, pages } });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+  return fail(res, 500, error.message);
   }
 });
+/**
+ * @openapi
+ * /api/plans:
+ *   get:
+ *     summary: List therapy plans
+ *     tags: [Therapy Plans]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: patient
+ *         schema: { type: string }
+ *       - in: query
+ *         name: therapist
+ *         schema: { type: string }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Plans list
+ */
 
-router.post("/", async (req, res) => {
+const createPlanSchema = z.object({
+  patient: z.string().min(1),
+  therapist: z.string().optional(),
+  status: z.enum(["draft","submitted","approved","needs_revision"]).optional(),
+  goals: z.array(z.object({ title: z.string().min(1), metric: z.string().optional(), target: z.number().optional() })).optional(),
+  activities: z.array(z.object({ name: z.string().min(1), frequency: z.string().optional(), duration: z.string().optional() })).optional(),
+  notes: z.string().max(2000).optional(),
+  attachments: z.array(z.string()).optional()
+});
+
+router.post("/", validateBody(createPlanSchema), async (req, res) => {
   try {
     const data = { ...req.body };
     // If therapist not provided, default to authenticated user (common UX expectation)
@@ -77,10 +116,10 @@ router.post("/", async (req, res) => {
       if (!resolved) return res.status(400).json({ error: `Unknown therapist id: ${data.therapist}` });
       data.therapist = resolved;
     }
-    const plan = await TherapyPlan.create(data);
-    res.status(201).json(plan);
+  const plan = await TherapyPlan.create(data);
+  return created(res, { data: plan });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+  return fail(res, 400, error.message);
   }
 });
 
@@ -89,10 +128,10 @@ router.get("/:id", async (req, res) => {
     const plan = await TherapyPlan.findById(req.params.id)
       .populate('patient', 'name')
       .populate('therapist', 'name email');
-    if (!plan) return res.status(404).json({ error: "Therapy plan not found" });
-    res.json(plan);
+  if (!plan) return fail(res, 404, "Therapy plan not found");
+  return ok(res, { data: plan });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -105,10 +144,10 @@ router.put("/:id", async (req, res) => {
       data.therapist = resolved;
     }
     const plan = await TherapyPlan.findByIdAndUpdate(req.params.id, data, { new: true });
-    if (!plan) return res.status(404).json({ error: "Therapy plan not found" });
-    res.json(plan);
+  if (!plan) return fail(res, 404, "Therapy plan not found");
+  return ok(res, { data: plan });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+  return fail(res, 400, error.message);
   }
 });
 
@@ -119,10 +158,10 @@ router.post("/:id/submit", async (req, res) => {
       { status: "submitted", submittedAt: new Date() },
       { new: true }
     );
-    if (!plan) return res.status(404).json({ error: "Therapy plan not found" });
-    res.json(plan);
+  if (!plan) return fail(res, 404, "Therapy plan not found");
+  return ok(res, { data: plan });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -134,10 +173,10 @@ router.post("/:id/review", async (req, res) => {
       { status: decision, reviewedAt: new Date(), supervisorComments: comments },
       { new: true }
     );
-    if (!plan) return res.status(404).json({ error: "Therapy plan not found" });
-    res.json(plan);
+  if (!plan) return fail(res, 404, "Therapy plan not found");
+  return ok(res, { data: plan });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+  return fail(res, 400, error.message);
   }
 });
 

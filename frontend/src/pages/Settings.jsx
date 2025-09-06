@@ -9,8 +9,6 @@ const Settings = () => {
   const [importing, setImporting] = useState(false);
   const [importWipe, setImportWipe] = useState(false);
   const [message, setMessage] = useState('');
-  // Force CSV format only
-  const entityFormat = 'csv';
   const [entity, setEntity] = useState('patients');
 
   const resetMessageLater = () => setTimeout(() => setMessage(''), 5000);
@@ -62,7 +60,6 @@ const Settings = () => {
     try {
       const entities = ['patients', 'users', 'therapyPlans', 'sessions', 'progressReports'];
       for (const ent of entities) {
-        // eslint-disable-next-line no-await-in-loop
         await handleEntityCSVDownload(ent);
       }
       setMessage('All CSV files downloaded');

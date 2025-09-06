@@ -1,115 +1,170 @@
-import express from "express";
-import cors from "cors";
-import morgan from "morgan";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-
-import patientRoutes from "./src/routes/patients.js";
-import planRoutes from "./src/routes/plans.js";
-import sessionRoutes from "./src/routes/sessions.js";
-import reportRoutes from "./src/routes/reports.js";
-import ratingRoutes from "./src/routes/ratings.js";
-import assignmentRoutes from "./src/routes/assignments.js";
-import userRoutes from "./src/routes/users.js";
-import notificationRoutes from "./src/routes/notifications.js";
-import analyticsRoutes from "./src/routes/analytics.js";
-import dataRoutes from "./src/routes/data.js";
+import swaggerJsdoc from "swagger-jsdoc";
+import swaggerUi from "swagger-ui-express";
+import app from "./src/app.js";
+import { fail } from "./src/middleware/respond.js";
+import { env, isProd, skipDb as shouldSkipDb } from "./src/config/env.js";
 
 dotenv.config();
-const app = express();
 
-// Middleware
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan("dev"));
-
-// Health check
-app.get("/health", (_req, res) => res.json({
-  ok: true,
-  timestamp: new Date().toISOString(),
-  environment: process.env.NODE_ENV || 'development'
-}));
-
-// API Routes
-app.use("/api/users", userRoutes);
-app.use("/api/patients", patientRoutes);
-app.use("/api/plans", planRoutes);
-app.use("/api/sessions", sessionRoutes);
-app.use("/api/progress-reports", reportRoutes);
-app.use("/api/ratings", ratingRoutes);
-app.use("/api/assignments", assignmentRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/data", dataRoutes);
-
-// Legacy dashboard route (for backwards compatibility)
-app.get("/api/dashboard", async (req, res) => {
-  res.redirect("/api/analytics/dashboard");
-});
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.originalUrl} not found`
+// Swagger/OpenAPI: mount only when ENABLE_API_DOCS=true (default off)
+if (env.ENABLE_API_DOCS === true) {
+  const swaggerSpec = swaggerJsdoc({
+    definition: {
+      openapi: '3.0.0',
+      info: {
+        title: 'Therapy CMS API',
+        version: '1.0.0'
+      },
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description: 'Include a valid Bearer token in the Authorization header.'
+          }
+        },
+        schemas: {
+          SuccessResponse: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', example: true },
+              data: { description: 'Payload' }
+            }
+          },
+          ErrorResponse: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', example: false },
+              error: { type: 'string' },
+              details: { description: 'Optional error details' }
+            }
+          },
+          User: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              name: { type: 'string' },
+              email: { type: 'string' },
+              role: { type: 'string', enum: ['therapist','supervisor','admin','patient'] },
+              active: { type: 'boolean' },
+              clerkUserId: { type: 'string' }
+            }
+          },
+          Patient: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              name: { type: 'string' },
+              caseStatus: { type: 'string' },
+              assignedTherapist: { $ref: '#/components/schemas/User' },
+              supervisor: { $ref: '#/components/schemas/User' }
+            }
+          },
+          TherapyPlan: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              patient: { $ref: '#/components/schemas/Patient' },
+              therapist: { $ref: '#/components/schemas/User' },
+              status: { type: 'string', enum: ['draft','submitted','approved','needs_revision'] },
+              updatedAt: { type: 'string', format: 'date-time' },
+              submittedAt: { type: 'string', format: 'date-time' },
+              reviewedAt: { type: 'string', format: 'date-time' }
+            }
+          },
+          Session: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              patient: { $ref: '#/components/schemas/Patient' },
+              therapist: { $ref: '#/components/schemas/User' },
+              date: { type: 'string', format: 'date-time' },
+              durationMin: { type: 'integer' }
+            }
+          },
+          ProgressReport: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              patient: { $ref: '#/components/schemas/Patient' },
+              therapist: { $ref: '#/components/schemas/User' },
+              sessionCount: { type: 'integer' },
+              submittedAt: { type: 'string', format: 'date-time' },
+              reviewedAt: { type: 'string', format: 'date-time' }
+            }
+          },
+          ClinicalRating: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              therapist: { $ref: '#/components/schemas/User' },
+              supervisor: { $ref: '#/components/schemas/User' },
+              createdAt: { type: 'string', format: 'date-time' }
+            }
+          },
+          Notification: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              toUser: { $ref: '#/components/schemas/User' },
+              title: { type: 'string' },
+              message: { type: 'string' },
+              read: { type: 'boolean' },
+              createdAt: { type: 'string', format: 'date-time' }
+            }
+          }
+        }
+      }
+    },
+    apis: ['./src/routes/*.js'] // JSDoc annotations in route files
   });
-});
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  console.log('API docs available at /api/docs');
+}
 
 // Error handling middleware
 const errorHandler = (err, req, res, next) => {
   console.error('Error:', err);
-
-  // MongoDB validation errors
   if (err.name === 'ValidationError') {
     const errors = Object.values(err.errors).map(e => e.message);
-    return res.status(400).json({
-      error: 'Validation Error',
-      messages: errors
-    });
+    return fail(res, 400, 'Validation Error', errors);
   }
-
-  // MongoDB duplicate key error
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
-    return res.status(400).json({
-      error: 'Duplicate Error',
-      message: `${field} already exists`
-    });
+    return fail(res, 400, `Duplicate Error: ${field} already exists`);
   }
-
-  // JWT errors
   if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      error: 'Invalid Token',
-      message: 'Authentication failed'
-    });
+    return fail(res, 401, 'Invalid Token');
   }
-
-  // Default error
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
+  return fail(res, err.status || 500, err.message || 'Internal Server Error');
 };
 
 app.use(errorHandler);
 
-const port = process.env.PORT || 4000;
-const mongoUri = process.env.MONGODB_URI;
-const skipDb = (process.env.SKIP_DB || '').toLowerCase() === 'true' || process.env.SKIP_DB === '1';
+const port = env.PORT;
+const mongoUri = env.MONGODB_URI;
+const skipDb = shouldSkipDb();
 
 // Start server listener (factored so we can call after DB ready OR immediately if skipping DB)
-function startHttpServer() {
+ function startHttpServer() {
   if (app.locals.serverStarted) return; // idempotent
   app.locals.serverStarted = true;
   app.listen(port, () => {
     console.log(`API server running on port ${port}`);
     console.log(`Health: http://localhost:${port}/health`);
-    if (skipDb) {
+    if (skipDb && mongoose.connection.readyState !== 1) {
       console.warn('⚠️  Server started WITHOUT a MongoDB connection (SKIP_DB enabled).');
     }
   });
+}
+
+// If explicitly skipping DB, start HTTP server immediately and don't attempt to connect
+if (skipDb) {
+  console.warn('SKIP_DB=true detected. Starting API without connecting to MongoDB.');
+  startHttpServer();
 }
 
 async function connectWithRetry(maxRetries = 30, delayMs = 5000) {
@@ -128,10 +183,7 @@ async function connectWithRetry(maxRetries = 30, delayMs = 5000) {
     attempt++;
     try {
       console.log(`Connecting to MongoDB (attempt ${attempt}/${maxRetries}) ...`);
-      await mongoose.connect(mongoUri, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
-      });
+  await mongoose.connect(mongoUri);
       console.log('✅ Connected to MongoDB');
       startHttpServer();
       return;
@@ -151,21 +203,36 @@ async function connectWithRetry(maxRetries = 30, delayMs = 5000) {
   }
 }
 
-connectWithRetry();
+// Only attempt DB connection when not skipping DB
+if (!skipDb) {
+  connectWithRetry();
+}
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   console.log('SIGTERM received. Shutting down gracefully...');
-  mongoose.connection.close(() => {
-    console.log('MongoDB connection closed.');
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed.');
+    }
+  } catch (e) {
+    console.warn('Error during MongoDB shutdown:', e.message);
+  } finally {
     process.exit(0);
-  });
+  }
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('SIGINT received. Shutting down gracefully...');
-  mongoose.connection.close(() => {
-    console.log('MongoDB connection closed.');
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed.');
+    }
+  } catch (e) {
+    console.warn('Error during MongoDB shutdown:', e.message);
+  } finally {
     process.exit(0);
-  });
+  }
 });

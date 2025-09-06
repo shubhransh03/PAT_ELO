@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+// Auth is provided via setAuthTokenGetter; no direct hook import needed here.
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
@@ -30,13 +30,26 @@ export async function apiCall(path, options = {}) {
   }
 
   const response = await fetch(url, config);
-  
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API Error: ${response.status} - ${error}`);
+
+  let payload = null;
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    payload = await response.json().catch(() => null);
+  } else {
+    const text = await response.text().catch(() => '');
+    payload = { success: response.ok, data: text };
   }
 
-  return response.json();
+  if (!response.ok || (payload && payload.success === false)) {
+    const msg = payload?.error || payload?.message || `Request failed (${response.status})`;
+    const err = new Error(msg);
+    err.status = response.status;
+    err.body = payload;
+    throw err;
+  }
+
+  // Support both raw payloads and { success, data }
+  return payload?.data !== undefined ? payload : payload;
 }
 
 export async function apiGet(path, params = {}) {

@@ -1,20 +1,53 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import Assignment from "../models/Assignment.js";
 import Patient from "../models/Patient.js";
 import User from "../models/User.js";
 import assignmentService from "../services/assignmentService.js";
 import notificationService from "../services/notificationService.js";
 import { verifyAuth } from "../middleware/verifyAuth.js";
+import { ok, created, fail } from "../middleware/respond.js";
+import { validateBody } from "../middleware/validate.js";
+import { autoAssignSchema, manualAssignSchema, unassignSchema } from "../validation/schemas.js";
 
 const router = Router();
 router.use(verifyAuth);
+
+// Per-route rate limits (auth-heavy endpoints stricter)
+const writeLimiter = rateLimit({ windowMs: 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false });
+const readLimiter = rateLimit({ windowMs: 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false });
 
 /**
  * GET /api/assignments
  * Get assignment history with filtering
  */
-router.get("/", async (req, res) => {
+/**
+ * @openapi
+ * /api/assignments:
+ *   get:
+ *     summary: List assignments
+ *     tags: [Assignments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: patient
+ *         schema: { type: string }
+ *       - in: query
+ *         name: therapist
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Assignments list
+ */
+router.get("/", readLimiter, async (req, res) => {
   try {
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+    if (skipDb) {
+      const { limit = 20, page = 1 } = req.query;
+      return ok(res, { data: [], pagination: { page: Number(page), limit: Number(limit), total: 0, pages: 0 } });
+    }
     const { patient, therapist, method, limit = 20, page = 1 } = req.query;
     const filter = {};
     
@@ -28,26 +61,16 @@ router.get("/", async (req, res) => {
       .sort({ createdAt: -1 })
       .populate('patient', 'name caseStatus')
       .populate('therapist', 'name email')
-      .populate('supervisor', 'name email');
+      .populate('supervisor', 'name email')
+      .select('patient therapist supervisor method rationale createdAt')
+      .lean();
     
     const total = await Assignment.countDocuments(filter);
     
-    res.json({ 
-      success: true,
-      data: docs, 
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
+  return ok(res, { data: docs, pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / limit) } });
   } catch (error) {
     console.error('Get assignments error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -55,23 +78,17 @@ router.get("/", async (req, res) => {
  * POST /api/assignments/auto-assign
  * Automatically assign a patient to the best-matched therapist
  */
-router.post("/auto-assign", async (req, res) => {
+router.post("/auto-assign", writeLimiter, validateBody(autoAssignSchema), async (req, res) => {
   try {
     // Check if user is supervisor or admin
     if (!['supervisor', 'admin'].includes(req.auth.role)) {
-      return res.status(403).json({ 
-        success: false, 
-        error: "Only supervisors and admins can assign patients" 
-      });
+      return fail(res, 403, "Only supervisors and admins can assign patients");
     }
 
     const { patientId } = req.body;
     
     if (!patientId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Patient ID is required" 
-      });
+      return fail(res, 400, "Patient ID is required");
     }
 
     // Use the assignment service for automated assignment
@@ -89,17 +106,10 @@ router.post("/auto-assign", async (req, res) => {
       'assigned'
     );
 
-    res.status(201).json({
-      success: true,
-      data: result,
-      message: 'Patient assigned automatically'
-    });
+  return created(res, { data: result, message: 'Patient assigned automatically' });
   } catch (error) {
     console.error('Auto-assign error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -107,23 +117,17 @@ router.post("/auto-assign", async (req, res) => {
  * POST /api/assignments/manual-assign
  * Manually assign a patient to a specific therapist
  */
-router.post("/manual-assign", async (req, res) => {
+router.post("/manual-assign", writeLimiter, validateBody(manualAssignSchema), async (req, res) => {
   try {
     // Check if user is supervisor or admin
     if (!['supervisor', 'admin'].includes(req.auth.role)) {
-      return res.status(403).json({ 
-        success: false, 
-        error: "Only supervisors and admins can assign patients" 
-      });
+      return fail(res, 403, "Only supervisors and admins can assign patients");
     }
 
     const { patientId, therapistId, reason } = req.body;
     
     if (!patientId || !therapistId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Patient ID and Therapist ID are required" 
-      });
+      return fail(res, 400, "Patient ID and Therapist ID are required");
     }
 
     // Use the assignment service for manual assignment
@@ -145,17 +149,10 @@ router.post("/manual-assign", async (req, res) => {
       isReassignment
     );
 
-    res.status(201).json({
-      success: true,
-      data: assignment,
-      message: `Patient ${isReassignment} successfully`
-    });
+  return created(res, { data: assignment, message: `Patient ${isReassignment} successfully` });
   } catch (error) {
     console.error('Manual assign error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -163,22 +160,35 @@ router.post("/manual-assign", async (req, res) => {
  * GET /api/assignments/patient/:patientId/history
  * Get assignment history for a specific patient
  */
-router.get("/patient/:patientId/history", async (req, res) => {
+/**
+ * @openapi
+ * /api/assignments/patient/{patientId}/history:
+ *   get:
+ *     summary: Get assignment history for a patient
+ *     tags: [Assignments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: patientId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: History entries
+ */
+router.get("/patient/:patientId/history", readLimiter, async (req, res) => {
   try {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+  if (skipDb) return ok(res, { data: [] });
     const { patientId } = req.params;
     
     const history = await assignmentService.getAssignmentHistory(patientId);
-    
-    res.json({
-      success: true,
-      data: history
-    });
+  return ok(res, { data: history });
   } catch (error) {
     console.error('Assignment history error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -186,14 +196,18 @@ router.get("/patient/:patientId/history", async (req, res) => {
  * GET /api/assignments/stats
  * Get assignment statistics for reporting
  */
-router.get("/stats", async (req, res) => {
+router.get("/stats", readLimiter, async (req, res) => {
   try {
     // Check permissions - supervisors and admins only
     if (!['supervisor', 'admin'].includes(req.auth.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Insufficient permissions for assignment statistics'
-      });
+  return fail(res, 403, 'Insufficient permissions for assignment statistics');
+    }
+
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+    if (skipDb) {
+      // Return a harmless stub in dev without DB
+      return ok(res, { data: { totalAssignments: 0, reassignments: 0, byMethod: { auto: 0, manual: 0 } } });
     }
 
     const { startDate, endDate } = req.query;
@@ -204,16 +218,10 @@ router.get("/stats", async (req, res) => {
 
     const stats = await assignmentService.getAssignmentStats(filters);
 
-    res.json({
-      success: true,
-      data: stats
-    });
+  return ok(res, { data: stats });
   } catch (error) {
     console.error('Assignment stats error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 
@@ -221,14 +229,11 @@ router.get("/stats", async (req, res) => {
  * POST /api/assignments/:id/unassign
  * Unassign a patient from their current therapist
  */
-router.post("/:id/unassign", async (req, res) => {
+router.post("/:id/unassign", writeLimiter, validateBody(unassignSchema), async (req, res) => {
   try {
     // Check if user is supervisor or admin
     if (!['supervisor', 'admin'].includes(req.auth.role)) {
-      return res.status(403).json({ 
-        success: false, 
-        error: "Only supervisors and admins can unassign patients" 
-      });
+      return fail(res, 403, "Only supervisors and admins can unassign patients");
     }
 
     const { id } = req.params;
@@ -238,10 +243,7 @@ router.post("/:id/unassign", async (req, res) => {
     const assignment = await Assignment.findById(id).populate(['patient', 'therapist']);
     
     if (!assignment) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assignment not found'
-      });
+      return fail(res, 404, 'Assignment not found');
     }
 
     // Update patient to remove assignment
@@ -267,17 +269,10 @@ router.post("/:id/unassign", async (req, res) => {
       'medium'
     );
 
-    res.json({
-      success: true,
-      data: unassignment,
-      message: 'Patient unassigned successfully'
-    });
+  return ok(res, { data: unassignment, message: 'Patient unassigned successfully' });
   } catch (error) {
     console.error('Unassign error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+  return fail(res, 500, error.message);
   }
 });
 

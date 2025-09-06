@@ -5,6 +5,7 @@ import TherapyPlan from '../models/TherapyPlan.js';
 import Session from '../models/Session.js';
 import ProgressReport from '../models/ProgressReport.js';
 import { verifyAuth } from '../middleware/verifyAuth.js';
+import { ok, fail } from '../middleware/respond.js';
 
 const router = Router();
 router.use(verifyAuth);
@@ -13,7 +14,7 @@ router.use(verifyAuth);
 function requireAdmin(req, res, next) {
     const role = req.auth?.role;
     if (!['admin', 'supervisor'].includes(role)) {
-        return res.status(403).json({ error: 'Forbidden', message: 'Admin or supervisor role required' });
+        return fail(res, 403, 'Forbidden', 'Admin or supervisor role required');
     }
     next();
 }
@@ -28,23 +29,25 @@ router.get('/export', requireAdmin, async (req, res) => {
             ProgressReport.find().lean()
         ]);
 
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', 'attachment; filename="export.json"');
-        res.json({
-            meta: {
-                exportedAt: new Date().toISOString(),
-                versions: { user: 1, patient: 1, plan: 1, session: 1, report: 1 }
-            },
-            users,
-            patients,
-            therapyPlans: plans,
-            sessions,
-            progressReports: reports
-        });
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="export.json"');
+    return ok(res, { meta: { exportedAt: new Date().toISOString(), versions: { user: 1, patient: 1, plan: 1, session: 1, report: 1 } }, users, patients, therapyPlans: plans, sessions, progressReports: reports });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+    return fail(res, 500, err.message);
     }
 });
+/**
+ * @openapi
+ * /api/data/export:
+ *   get:
+ *     summary: Export all data (admin/supervisor)
+ *     tags: [Data]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Export JSON payload
+ */
 
 // Helper to convert array of objects to CSV string
 function toCSV(rows) {
@@ -77,7 +80,7 @@ router.get('/export/:entity', requireAdmin, async (req, res) => {
         const { entity } = req.params;
         const { format = 'json' } = req.query;
         const cfg = ENTITY_CONFIG[entity];
-        if (!cfg) return res.status(400).json({ error: 'Unknown entity' });
+        if (!cfg) return fail(res, 400, 'Unknown entity');
         const docs = await cfg.model.find().lean();
         if (format === 'csv') {
             const flat = docs.map(d => ({
@@ -93,11 +96,31 @@ router.get('/export/:entity', requireAdmin, async (req, res) => {
         }
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename="${entity}.json"`);
-        res.json(docs);
+        return ok(res, { data: docs });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        return fail(res, 500, err.message);
     }
 });
+/**
+ * @openapi
+ * /api/data/export/{entity}:
+ *   get:
+ *     summary: Export a specific entity (JSON/CSV)
+ *     tags: [Data]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: entity
+ *         required: true
+ *         schema: { type: string, enum: [users, patients, therapyPlans, sessions, progressReports] }
+ *       - in: query
+ *         name: format
+ *         schema: { type: string, enum: [json, csv] }
+ *     responses:
+ *       200:
+ *         description: Export payload
+ */
 
 
 router.post('/import', requireAdmin, async (req, res) => {
@@ -138,10 +161,22 @@ router.post('/import', requireAdmin, async (req, res) => {
         results.sessions = await safeInsert(Session, sessions);
         results.progressReports = await safeInsert(ProgressReport, progressReports);
 
-        res.json({ status: 'ok', results });
+    return ok(res, { results });
     } catch (err) {
-        res.status(400).json({ error: err.message });
+    return fail(res, 400, err.message);
     }
 });
+/**
+ * @openapi
+ * /api/data/import:
+ *   post:
+ *     summary: Import data (admin)
+ *     tags: [Data]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Import results
+ */
 
 export default router;

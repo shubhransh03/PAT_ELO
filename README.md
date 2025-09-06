@@ -139,6 +139,9 @@ npm run dev
 # Or production mode
 npm start
 
+# Quick boot without MongoDB (for UI/health checks)
+npm run dev:nodb
+
 # Seed sample data (optional)
 npm run seed
 ```

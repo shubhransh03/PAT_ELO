@@ -28,4 +28,11 @@ const TherapyPlanSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for efficient filtering and sorting
+TherapyPlanSchema.index({ status: 1, updatedAt: -1 });
+TherapyPlanSchema.index({ therapist: 1, updatedAt: -1 });
+TherapyPlanSchema.index({ patient: 1, updatedAt: -1 });
+TherapyPlanSchema.index({ submittedAt: -1 });
+TherapyPlanSchema.index({ reviewedAt: -1 });
+
 export default mongoose.model("TherapyPlan", TherapyPlanSchema);

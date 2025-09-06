@@ -892,6 +892,28 @@
   font-size: 1.1rem;
 }
 
+/* Toasts */
+.toast-container {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+}
+.toast {
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  max-width: 360px;
+}
+.toast-success { background: #2d6a4f; }
+.toast-error { background: #c92a2a; }
+.toast-info { background: #364fc7; }
+.toast-warn { background: #e67700; }
 .loading::before {
   content: "⟳";
   display: inline-block;

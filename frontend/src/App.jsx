@@ -8,18 +8,23 @@ import {
 } from "@clerk/clerk-react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import Navigation from "./components/Navigation";
 import AuthProvider from "./components/AuthProvider";
 import RoleInitializer from "./components/RoleInitializer";
-import Dashboard from "./pages/Dashboard";
-import PatientAllocation from "./pages/PatientAllocation";
-import TherapyPlans from "./pages/TherapyPlans";
-import Sessions from "./pages/Sessions";
-import ProgressReports from "./pages/ProgressReports";
-import Evaluations from "./pages/Evaluations";
-import Analytics from "./pages/Analytics";
-import UserManagement from "./pages/UserManagement";
-import Settings from "./pages/Settings";
+import ToastProvider from "./components/ToastProvider";
+import ErrorBoundary from "./components/ErrorBoundary";
+import ServerStatusProvider from "./components/ServerStatusProvider";
+import ServerStatusBanner from "./components/ServerStatusBanner.jsx";
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const PatientAllocation = React.lazy(() => import("./pages/PatientAllocation"));
+const TherapyPlans = React.lazy(() => import("./pages/TherapyPlans"));
+const Sessions = React.lazy(() => import("./pages/Sessions"));
+const ProgressReports = React.lazy(() => import("./pages/ProgressReports"));
+const Evaluations = React.lazy(() => import("./pages/Evaluations"));
+const Analytics = React.lazy(() => import("./pages/Analytics"));
+const UserManagement = React.lazy(() => import("./pages/UserManagement"));
+const Settings = React.lazy(() => import("./pages/Settings"));
 import "./App.css";
 import "./styles/common.css";
 import "./styles/enhanced.css";
@@ -29,7 +34,20 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       staleTime: 5 * 60 * 1000, // 5 minutes
-      cacheTime: 10 * 60 * 1000, // 10 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes (react-query v5 uses gcTime)
+      onError: (error) => {
+        const message = error?.message || 'Request failed';
+        try { window.dispatchEvent(new CustomEvent('app:toast', { detail: { type: 'error', message } })); } catch {}
+      },
+    },
+    mutations: {
+      onError: (error) => {
+        const message = error?.message || 'Action failed';
+        try { window.dispatchEvent(new CustomEvent('app:toast', { detail: { type: 'error', message } })); } catch {}
+      },
+      onSuccess: () => {
+        // Optionally show success toasts for mutations
+      },
     },
   },
 });
@@ -64,6 +82,8 @@ function App() {
   };
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+      <ServerStatusProvider>
       <Router>
         <div className="app">
           <SignedOut>
@@ -136,27 +156,37 @@ function App() {
           <SignedIn>
             <AuthProvider>
               <RoleInitializer />
-              <div className="app-layout">
-                <Navigation />
-                <main className="main-content">
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/patient-allocation" element={<PatientAllocation />} />
-                    <Route path="/therapy-plans" element={<TherapyPlans />} />
-                    <Route path="/sessions" element={<Sessions />} />
-                    <Route path="/progress-reports" element={<ProgressReports />} />
-                    <Route path="/evaluations" element={<Evaluations />} />
-                    <Route path="/analytics" element={<Analytics />} />
-                    <Route path="/user-management" element={<UserManagement />} />
-                    <Route path="/settings" element={<Settings />} />
-                  </Routes>
-                </main>
-              </div>
+              <ErrorBoundary>
+                <div className="app-layout">
+                  <Navigation />
+                  <ServerStatusBanner />
+                  <main className="main-content">
+                    <React.Suspense fallback={<div style={{ padding: 24 }}>Loading...</div>}>
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/patient-allocation" element={<PatientAllocation />} />
+                        <Route path="/therapy-plans" element={<TherapyPlans />} />
+                        <Route path="/sessions" element={<Sessions />} />
+                        <Route path="/progress-reports" element={<ProgressReports />} />
+                        <Route path="/evaluations" element={<Evaluations />} />
+                        <Route path="/analytics" element={<Analytics />} />
+                        <Route path="/user-management" element={<UserManagement />} />
+                        <Route path="/settings" element={<Settings />} />
+                        <Route path="*" element={<div style={{padding: 24}}><h2>Page not found</h2><p>The page you’re looking for doesn’t exist.</p></div>} />
+                      </Routes>
+                    </React.Suspense>
+                  </main>
+                </div>
+              </ErrorBoundary>
             </AuthProvider>
           </SignedIn>
         </div>
       </Router>
+      </ServerStatusProvider>
+      </ToastProvider>
+      {/* Devtools only in development */}
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>
   );
 }

@@ -1,17 +1,53 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import Notification from "../models/Notification.js";
 import notificationService from "../services/notificationService.js";
 import { verifyAuth } from "../middleware/verifyAuth.js";
+import { ok, created, fail } from "../middleware/respond.js";
+import { validateBody } from "../middleware/validate.js";
+import { systemAlertSchema } from "../validation/schemas.js";
 
 const router = Router();
 router.use(verifyAuth);
+
+// Rate limits
+const writeLimiter = rateLimit({ windowMs: 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false });
+const readLimiter = rateLimit({ windowMs: 60 * 1000, max: 400, standardHeaders: true, legacyHeaders: false });
 
 /**
  * GET /api/notifications
  * Get notifications for the authenticated user
  */
-router.get("/", async (req, res) => {
+/**
+ * @openapi
+ * /api/notifications:
+ *   get:
+ *     summary: List notifications for current user
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *       - in: query
+ *         name: unreadOnly
+ *         schema: { type: boolean }
+ *     responses:
+ *       200:
+ *         description: Notifications list
+ */
+router.get("/", readLimiter, async (req, res) => {
   try {
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+    if (skipDb) {
+      const { limit = 20, page = 1 } = req.query;
+      return ok(res, { data: [], pagination: { page: Number(page), limit: Number(limit), total: 0, pages: 0 }, unreadCount: 0 });
+    }
     const { 
       page = 1, 
       limit = 20, 
@@ -31,18 +67,10 @@ router.get("/", async (req, res) => {
       options
     );
 
-    res.json({
-      success: true,
-      data: result.notifications,
-      pagination: result.pagination,
-      unreadCount: result.unreadCount
-    });
+  return ok(res, { data: result.notifications, pagination: result.pagination, unreadCount: result.unreadCount });
   } catch (error) {
     console.error('Get notifications error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch notifications'
-    });
+  return fail(res, 500, 'Failed to fetch notifications');
   }
 });
 
@@ -50,20 +78,17 @@ router.get("/", async (req, res) => {
  * GET /api/notifications/unread-count
  * Get count of unread notifications
  */
-router.get("/unread-count", async (req, res) => {
+router.get("/unread-count", readLimiter, async (req, res) => {
   try {
+    const skipDb = (process.env.SKIP_DB || '').toLowerCase() === 'true' || process.env.SKIP_DB === '1';
+    if (skipDb) {
+      return ok(res, { count: 0 });
+    }
     const count = await Notification.getUnreadCount(req.auth.userId);
-    
-    res.json({
-      success: true,
-      count
-    });
+    return ok(res, { count });
   } catch (error) {
     console.error('Get unread count error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get unread count'
-    });
+    return fail(res, 500, 'Failed to get unread count');
   }
 });
 
@@ -71,29 +96,23 @@ router.get("/unread-count", async (req, res) => {
  * PATCH /api/notifications/:id/read
  * Mark a notification as read
  */
-router.patch("/:id/read", async (req, res) => {
+router.patch("/:id/read", writeLimiter, async (req, res) => {
   try {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+  if (skipDb) return fail(res, 404, 'Notification not found');
     const notification = await notificationService.markAsRead(
       req.params.id, 
       req.auth.userId
     );
 
-    res.json({
-      success: true,
-      data: notification
-    });
+    return ok(res, { data: notification });
   } catch (error) {
     console.error('Mark as read error:', error);
     if (error.message.includes('not found')) {
-      return res.status(404).json({
-        success: false,
-        error: 'Notification not found'
-      });
+      return fail(res, 404, 'Notification not found');
     }
-    res.status(500).json({
-      success: false,
-      error: 'Failed to mark notification as read'
-    });
+    return fail(res, 500, 'Failed to mark notification as read');
   }
 });
 
@@ -101,22 +120,13 @@ router.patch("/:id/read", async (req, res) => {
  * PATCH /api/notifications/mark-all-read
  * Mark all notifications as read for the user
  */
-router.patch("/mark-all-read", async (req, res) => {
+router.patch("/mark-all-read", writeLimiter, async (req, res) => {
   try {
     const result = await notificationService.markAllAsRead(req.auth.userId);
-
-    res.json({
-      success: true,
-      data: {
-        modifiedCount: result.modifiedCount
-      }
-    });
+  return ok(res, { data: { modifiedCount: result.modifiedCount } });
   } catch (error) {
     console.error('Mark all as read error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to mark all notifications as read'
-    });
+  return fail(res, 500, 'Failed to mark all notifications as read');
   }
 });
 
@@ -124,32 +134,26 @@ router.patch("/mark-all-read", async (req, res) => {
  * DELETE /api/notifications/:id
  * Delete a notification (only the recipient can delete)
  */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", writeLimiter, async (req, res) => {
   try {
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const skipDb = !isProd && (((process.env.SKIP_DB || '').toLowerCase() === 'true') || process.env.SKIP_DB === '1');
+  if (skipDb) return fail(res, 404, 'Notification not found');
     const notification = await Notification.findOne({
       _id: req.params.id,
       toUser: req.auth.userId
     });
 
     if (!notification) {
-      return res.status(404).json({
-        success: false,
-        error: 'Notification not found'
-      });
+      return fail(res, 404, 'Notification not found');
     }
 
     await notification.deleteOne();
 
-    res.json({
-      success: true,
-      message: 'Notification deleted successfully'
-    });
+  return ok(res, { message: 'Notification deleted successfully' });
   } catch (error) {
     console.error('Delete notification error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete notification'
-    });
+  return fail(res, 500, 'Failed to delete notification');
   }
 });
 
@@ -157,30 +161,21 @@ router.delete("/:id", async (req, res) => {
  * POST /api/notifications/system-alert (Admin only)
  * Create a system alert notification
  */
-router.post("/system-alert", async (req, res) => {
+router.post("/system-alert", writeLimiter, validateBody(systemAlertSchema), async (req, res) => {
   try {
     // Check if user is admin
     if (req.auth.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only administrators can create system alerts'
-      });
+  return fail(res, 403, 'Only administrators can create system alerts');
     }
 
     const { targetUsers, title, message, priority = 'medium' } = req.body;
 
     if (!title || !message) {
-      return res.status(400).json({
-        success: false,
-        error: 'Title and message are required'
-      });
+      return fail(res, 400, 'Title and message are required');
     }
 
     if (!Array.isArray(targetUsers) || targetUsers.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Target users array is required'
-      });
+      return fail(res, 400, 'Target users array is required');
     }
 
     // Create notifications for each target user
@@ -190,17 +185,10 @@ router.post("/system-alert", async (req, res) => {
       )
     );
 
-    res.status(201).json({
-      success: true,
-      data: notifications.filter(n => n !== null), // Filter out failed notifications
-      message: 'System alerts created successfully'
-    });
+  return created(res, { data: notifications.filter(n => n !== null), message: 'System alerts created successfully' });
   } catch (error) {
     console.error('Create system alert error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create system alert'
-    });
+  return fail(res, 500, 'Failed to create system alert');
   }
 });
 
@@ -208,14 +196,11 @@ router.post("/system-alert", async (req, res) => {
  * GET /api/notifications/stats (Admin/Supervisor only)
  * Get notification statistics
  */
-router.get("/stats", async (req, res) => {
+router.get("/stats", readLimiter, async (req, res) => {
   try {
     // Check if user has permission
     if (!['admin', 'supervisor'].includes(req.auth.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Insufficient permissions'
-      });
+  return fail(res, 403, 'Insufficient permissions');
     }
 
     const { startDate, endDate } = req.query;
@@ -226,16 +211,10 @@ router.get("/stats", async (req, res) => {
 
     const stats = await notificationService.getNotificationStats(filters);
 
-    res.json({
-      success: true,
-      data: stats
-    });
+  return ok(res, { data: stats });
   } catch (error) {
     console.error('Get notification stats error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get notification statistics'
-    });
+  return fail(res, 500, 'Failed to get notification statistics');
   }
 });
 
@@ -243,32 +222,20 @@ router.get("/stats", async (req, res) => {
  * DELETE /api/notifications/cleanup (Admin only)
  * Clean up old read notifications
  */
-router.delete("/cleanup", async (req, res) => {
+router.delete("/cleanup", writeLimiter, async (req, res) => {
   try {
     // Check if user is admin
     if (req.auth.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only administrators can perform cleanup'
-      });
+  return fail(res, 403, 'Only administrators can perform cleanup');
     }
 
     const { daysOld = 90 } = req.query;
     const result = await notificationService.deleteOldNotifications(parseInt(daysOld));
 
-    res.json({
-      success: true,
-      data: {
-        deletedCount: result.deletedCount
-      },
-      message: `Cleaned up notifications older than ${daysOld} days`
-    });
+  return ok(res, { data: { deletedCount: result.deletedCount }, message: `Cleaned up notifications older than ${daysOld} days` });
   } catch (error) {
     console.error('Notification cleanup error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to cleanup old notifications'
-    });
+  return fail(res, 500, 'Failed to cleanup old notifications');
   }
 });
 

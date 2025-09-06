@@ -11,4 +11,8 @@ const ClinicalRatingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for trend and performance analytics
+ClinicalRatingSchema.index({ therapist: 1, createdAt: -1 });
+ClinicalRatingSchema.index({ createdAt: -1 });
+
 export default mongoose.model("ClinicalRating", ClinicalRatingSchema);

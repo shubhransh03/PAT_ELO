@@ -11,4 +11,10 @@ const AssignmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes to optimize common list filters and sorts
+AssignmentSchema.index({ patient: 1, createdAt: -1 });
+AssignmentSchema.index({ therapist: 1, createdAt: -1 });
+AssignmentSchema.index({ supervisor: 1, createdAt: -1 });
+AssignmentSchema.index({ method: 1, createdAt: -1 });
+
 export default mongoose.model("Assignment", AssignmentSchema);

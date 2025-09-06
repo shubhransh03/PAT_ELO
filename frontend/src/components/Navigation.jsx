@@ -160,27 +160,7 @@ const Navigation = () => {
     openUserProfile();
   };
 
-  const getRoleColor = (role) => {
-    switch (role) {
-      case 'admin': return '#dc2626';
-      case 'supervisor': return '#f59e0b';
-  case 'doctor': return '#0ea5e9';
-  case 'therapist': return '#3b82f6';
-  case 'patient': return '#10b981';
-      default: return '#6b7280';
-    }
-  };
-
-  const getRoleIcon = (role) => {
-    switch (role) {
-      case 'admin': return '👑';
-      case 'supervisor': return '🎯';
-  case 'doctor': return '🩺';
-  case 'therapist': return '💬';
-  case 'patient': return '👤';
-      default: return '👤';
-    }
-  };
+  // (role color/icon helpers removed; not used in rendered output)
 
   return (
     <>

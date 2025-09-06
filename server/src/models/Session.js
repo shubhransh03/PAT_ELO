@@ -14,4 +14,9 @@ const SessionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Indexes for date-based and user-based lookups
+SessionSchema.index({ therapist: 1, date: -1 });
+SessionSchema.index({ patient: 1, date: -1 });
+SessionSchema.index({ createdAt: -1 });
+
 export default mongoose.model("Session", SessionSchema);

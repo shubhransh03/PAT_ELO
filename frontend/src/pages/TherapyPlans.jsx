@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useUser } from '@clerk/clerk-react';
-import { apiGet, apiPost, apiPatch, apiPut } from '../api';
+import { apiGet, apiPost, apiPut } from '../api';
 
 const TherapyPlans = () => {
   const { user } = useUser();
@@ -190,7 +190,7 @@ const TherapyPlans = () => {
                         body: JSON.stringify(json)
                       });
                       if (!res.ok) throw new Error('Import failed');
-                      const result = await res.json();
+                      await res.json();
                       alert('Import complete');
                       queryClient.invalidateQueries(['therapy-plans']);
                     } catch (err) {
